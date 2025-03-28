@@ -1,4 +1,6 @@
-python-telegram-bot 
-openai 
-requests 
-moviepy
+python-telegram-bot==20.5
+openai>=1.0.0
+requests>=2.28.0
+moviepy>=1.0.3
+imageio-ffmpeg>=0.4.7
+python-dotenv>=0.21.0
