@@ -37,4 +37,4 @@ VOLUME /app/cache
 VOLUME /app/models
 
 # Run the bot
-CMD ["python", "-m", "Telegram-chatbot"]
+CMD ["python", "-m", "telegram_chatbot"]
