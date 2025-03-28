@@ -1,7 +1,9 @@
+numpy==1.26.4  # Explicitly pin to last 1.x version
+torch==2.1.0+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+torchvision==0.16.0+cu121
 python-telegram-bot==20.5
 transformers==4.35.2
 diffusers==0.24.0
-torch==2.1.0
 accelerate==0.25.0
 moviepy==1.0.3
 python-dotenv==1.0.0
