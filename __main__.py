@@ -1,123 +1,137 @@
+# __main__.py
 import os
 import logging
+import tempfile
+import requests
+import torch
 from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from openai import OpenAI
-import requests
-import tempfile
+from transformers import pipeline
+from diffusers import StableDiffusionPipeline
 from moviepy.editor import ImageSequenceClip
 
-# Configure API Keys
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-UNSPLASH_API_KEY = os.getenv("UNSPLASH_API_KEY")  # Optional for real images
-
-# Initialize OpenAI Client
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# Set up logging
+# Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
+
+# Load environment variables
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+MODEL_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Initialize AI models
+text_pipeline = pipeline(
+    "text-generation",
+    model="mistralai/Mistral-7B-Instruct-v0.1",
+    device=MODEL_DEVICE,
+    torch_dtype=torch.float16 if MODEL_DEVICE == "cuda" else torch.float32
+)
+
+image_pipeline = StableDiffusionPipeline.from_pretrained(
+    "stabilityai/stable-diffusion-2-1",
+    torch_dtype=torch.float16 if MODEL_DEVICE == "cuda" else torch.float32
+).to(MODEL_DEVICE)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send welcome message"""
     await update.message.reply_text(
-        "🤖 Hello! I can:\n"
-        "- Generate images from text prompts (/image <prompt>)\n"
-        "- Answer questions (/ask <question>)\n"
-        "- Create videos from text (/video <prompt>)"
+        "🤖 Free AI Bot\n"
+        "/ask <question> - Get answers\n"
+        "/image <prompt> - Generate images\n"
+        "/video <prompt> - Create short videos"
     )
 
+async def generate_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text generation requests"""
+    try:
+        prompt = ' '.join(context.args)
+        if not prompt:
+            await update.message.reply_text("Please enter a question after /ask")
+            return
+
+        async with update.message.chat.send_action(action="typing"):
+            response = text_pipeline(
+                prompt,
+                max_length=200,
+                do_sample=True,
+                temperature=0.7
+            )
+            
+        await update.message.reply_text(response[0]['generated_text'])
+        
+    except Exception as e:
+        logger.error(f"Text generation error: {str(e)}")
+        await update.message.reply_text("Error generating response")
+
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = ' '.join(context.args)
-    if not prompt:
-        await update.message.reply_text("Please provide a prompt after /image")
-        return
-
+    """Handle image generation requests"""
     try:
-        # Generate image using DALL-E
-        response = client.images.generate(
-            model="dall-e-3",
-            prompt=prompt,
-            size="1024x1024",
-            quality="standard",
-            n=1,
-        )
+        prompt = ' '.join(context.args)
+        if not prompt:
+            await update.message.reply_text("Please enter a prompt after /image")
+            return
 
-        image_url = response.data[0].url
-        await update.message.reply_photo(image_url)
-        
+        async with update.message.chat.send_action(action="upload_photo"):
+            image = image_pipeline(prompt).images[0]
+            
+            # Save temporary image
+            with tempfile.NamedTemporaryFile(suffix=".png") as temp_file:
+                image.save(temp_file.name)
+                await update.message.reply_photo(photo=open(temp_file.name, 'rb'))
+                
     except Exception as e:
-        await update.message.reply_text(f"Error generating image: {str(e)}")
-
-async def answer_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    question = ' '.join(context.args)
-    if not question:
-        await update.message.reply_text("Please provide a question after /ask")
-        return
-
-    try:
-        # Generate answer using GPT-4
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": question}
-            ]
-        )
-        
-        answer = response.choices[0].message.content
-        await update.message.reply_text(answer)
-        
-    except Exception as e:
-        await update.message.reply_text(f"Error generating answer: {str(e)}")
+        logger.error(f"Image generation error: {str(e)}")
+        await update.message.reply_text("Error generating image")
 
 async def generate_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = ' '.join(context.args)
-    if not prompt:
-        await update.message.reply_text("Please provide a prompt after /video")
-        return
-
+    """Handle video generation requests"""
     try:
-        # Generate multiple images for video
-        images = []
-        for _ in range(5):  # Generate 5 frames
-            response = client.images.generate(
-                model="dall-e-3",
-                prompt=f"{prompt} - frame {_+1}/5",
-                size="512x512",
-                n=1,
-            )
-            images.append(requests.get(response.data[0].url).content)
+        prompt = ' '.join(context.args)
+        if not prompt:
+            await update.message.reply_text("Please enter a prompt after /video")
+            return
 
-        # Create video from images
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            frame_paths = []
-            for i, img_data in enumerate(images):
-                path = f"{tmp_dir}/frame_{i}.png"
-                with open(path, "wb") as f:
-                    f.write(img_data)
-                frame_paths.append(path)
-
-            clip = ImageSequenceClip(frame_paths, fps=1)
-            video_path = f"{tmp_dir}/output.mp4"
-            clip.write_videofile(video_path, codec="libx264")
-
-            await update.message.reply_video(InputFile(video_path))
+        async with update.message.chat.send_action(action="upload_video"):
+            # Generate 3 frames
+            frames = []
+            for i in range(3):
+                result = image_pipeline(f"{prompt} - frame {i+1}")
+                frames.append(result.images[0])
             
+            # Create video
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                frame_paths = []
+                for idx, frame in enumerate(frames):
+                    path = f"{tmp_dir}/frame_{idx}.png"
+                    frame.save(path)
+                    frame_paths.append(path)
+                
+                clip = ImageSequenceClip(frame_paths, fps=2)
+                video_path = f"{tmp_dir}/output.mp4"
+                clip.write_videofile(video_path, codec="libx264", logger=None)
+                
+                await update.message.reply_video(
+                    video=InputFile(video_path),
+                    caption="Generated video"
+                )
+                
     except Exception as e:
-        await update.message.reply_text(f"Error generating video: {str(e)}")
+        logger.error(f"Video generation error: {str(e)}")
+        await update.message.reply_text("Error generating video")
 
 def main():
+    """Run the bot"""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # Command handlers
+    
+    # Register handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("ask", generate_answer))
     application.add_handler(CommandHandler("image", generate_image))
-    application.add_handler(CommandHandler("ask", answer_question))
     application.add_handler(CommandHandler("video", generate_video))
-
+    
+    # Start polling
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
