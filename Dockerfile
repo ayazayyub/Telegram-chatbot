@@ -23,4 +23,4 @@ ENV OPENAI_API_KEY=your_openai_key
 ENV UNSPLASH_API_KEY=optional_unsplash_key
 
 # Run the bot
-CMD ["python", "bot.py"]
+CMD ["python", "__main__.py"]
