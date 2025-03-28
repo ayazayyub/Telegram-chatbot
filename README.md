@@ -1,7 +1,7 @@
 # AI-Powered Telegram Bot 🤖✨
 
 A feature-rich Telegram bot leveraging OpenAI's API to provide:
-- 🖼️ **Text-to-Image Generation** (DALL-E 3)
+- 🖼️ **Text-to-ImageGeneration** (DALL-E 3)
 - 💬 **Smart Q&A** (GPT-4)
 - 🎥 **Simple Video Creation** (Image sequences)
 
